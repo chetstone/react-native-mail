@@ -1,8 +1,10 @@
 package com.chirag.RNMail;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.support.v4.app.ActivityCompat;
 import android.net.Uri;
 
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -11,9 +13,16 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.Callback;
+//import com.facebook.react.bridge.ActivityEventListener;
+import com.facebook.react.bridge.ReactContext;
+
 
 import java.util.List;
 import java.io.File;
+
+interface ActivityResultInterface {
+  void callback(int requestCode, int resultCode, Intent data);
+}
 
 /**
  * NativeModule that allows JS to open emails sending apps chooser.
@@ -22,9 +31,21 @@ public class RNMailModule extends ReactContextBaseJavaModule {
 
   ReactApplicationContext reactContext;
 
+  private static final int MAIL_SEND_REQUEST = 73714;
+
+  private RNMailActivityEventListener mActivityEventListener;
+  private Callback mCallback;
+
   public RNMailModule(ReactApplicationContext reactContext) {
     super(reactContext);
     this.reactContext = reactContext;
+
+    mActivityEventListener = new RNMailActivityEventListener(reactContext, new ActivityResultInterface() {
+        @Override
+        public void callback(int requestCode, int resultCode, Intent data) {
+          onActivityResult(requestCode, resultCode, data);
+        }
+      });
   }
 
   @Override
@@ -33,12 +54,12 @@ public class RNMailModule extends ReactContextBaseJavaModule {
   }
 
   /**
-    * Converts a ReadableArray to a String array
-    *
-    * @param r the ReadableArray instance to convert
-    *
-    * @return array of strings
-  */
+   * Converts a ReadableArray to a String array
+   *
+   * @param r the ReadableArray instance to convert
+   *
+   * @return array of strings
+   */
   private String[] readableArrayToStringArray(ReadableArray r) {
     int length = r.size();
     String[] strArray = new String[length];
@@ -52,6 +73,16 @@ public class RNMailModule extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void mail(ReadableMap options, Callback callback) {
+    Activity currentActivity = getCurrentActivity();
+
+    if (currentActivity == null) {
+      callback.invoke("Activity doesn't exist");
+      return;
+    }
+
+    // Store the promise to resolve/reject when picker returns data
+    mCallback = callback;
+
     Intent i = new Intent(Intent.ACTION_SENDTO);
     i.setData(Uri.parse("mailto:"));
 
@@ -99,19 +130,37 @@ public class RNMailModule extends ReactContextBaseJavaModule {
     if (list.size() == 1) {
       i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       try {
-        reactContext.startActivity(i);
+        currentActivity.startActivityForResult(i, MAIL_SEND_REQUEST);
       } catch (Exception ex) {
         callback.invoke("error");
+        mCallback = null;
       }
     } else {
       Intent chooser = Intent.createChooser(i, "Send Mail");
       chooser.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
       try {
-        reactContext.startActivity(chooser);
+        currentActivity.startActivityForResult(chooser, MAIL_SEND_REQUEST);
       } catch (Exception ex) {
         callback.invoke("error");
+        mCallback = null;
       }
     }
   }
+  public void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+    //robustness code
+    if (mCallback == null || requestCode != MAIL_SEND_REQUEST) {
+      return;
+    }
+
+    // user cancel
+    if (resultCode != Activity.RESULT_OK) {
+      mCallback.invoke(false, "cancelled");
+    } else {
+      mCallback.invoke(false, "sent");
+    }
+    mCallback = null;
+    return;
+  }
+
 }
